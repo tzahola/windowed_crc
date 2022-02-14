@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 
+
 template<typename T>
 struct put_poly_t: std::enable_if<std::is_unsigned<T>::value> {
     T poly;
@@ -55,28 +56,16 @@ static std::ostream& operator<<(std::ostream& os, put_poly_t<T> p) {
     return os;
 }
 
-static std::uint64_t mul(std::uint32_t a, std::uint32_t b) {
-    std::uint64_t bb = std::uint64_t(b) << 32;
-
-    std::uint64_t result = 0;
+static std::uint32_t mul(std::uint32_t a, std::uint32_t b, std::uint32_t poly) {
+    std::uint32_t result = 0;
+    
     while (a != 0) {
         if (a & (1 << 31)) {
-            result ^= bb;
+            result ^= b;
         }
-        bb >>= 1;
+        b = (b >> 1) ^ ((b & 1) ? poly : 0);
         a <<= 1;
     }
-
-    return result;
-}
-
-static std::uint32_t mod(std::uint64_t p, const std::vector<std::uint32_t>& table) {
-    std::uint32_t result = 0;
-    for (unsigned i = 0; i < 4; i++) {
-        result = table[(p ^ result) & 0xFF] ^ (result >> 8);
-        p >>= 8;
-    }
-    result ^= p;
     return result;
 }
 
@@ -125,10 +114,10 @@ int main(int argc, const char * argv[]) {
     const std::uint32_t postXOR = ~0;
     const std::uint32_t poly = 0xEDB88320; // (x^32 +) x^26 + x^23 + x^22 + x^16 + x^12 + x^11 + x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
 
-    std::vector<std::uint32_t> crcTable = makeTable(poly, poly);
+    auto crcTable = makeTable(poly, poly);
 
     std::vector<std::uint8_t> buffer(window);
-    if(!std::cin.read(reinterpret_cast<decltype(std::cin)::char_type*>(buffer.data()), buffer.size()) || std::cin.gcount() != window) {
+    if(!std::cin.read(reinterpret_cast<char*>(buffer.data()), buffer.size())) {
         if (std::cin.bad()) {
             std::cerr << "Error: failed to read input" << std::endl;
             return 1;
@@ -147,22 +136,22 @@ int main(int argc, const char * argv[]) {
     {
         unsigned long windowBits = 8 * window;
         for (unsigned long i = 1 << (sizeof(windowBits) * 8 - clzl(windowBits)); i != 0; i >>= 1) {
-            xPowWindowBits = mod(mul(xPowWindowBits, xPowWindowBits), crcTable);
+            xPowWindowBits = mul(xPowWindowBits, xPowWindowBits, poly);
             if (windowBits & i) {
                 xPowWindowBits = (xPowWindowBits >> 1) ^ (xPowWindowBits & 1 ? poly : 0);
             }
         }
     }
 
-    std::uint32_t crcXOR = mod(mul(preXOR, xPowWindowBits), crcTable) ^ postXOR;
-    std::vector<std::uint32_t> prefixByteTable = makeTable(mod(mul(poly, xPowWindowBits), crcTable), poly);
+    std::uint32_t crcXOR = mul(preXOR, xPowWindowBits, poly) ^ postXOR;
+    auto prefixByteTable = makeTable(mul(poly, xPowWindowBits, poly), poly);
 
     while (true) {
         for (long i = 0; i != window; i++) {
             std::cout << std::hex << std::setw(8) << std::setfill('0') << (crc ^ crcXOR) << std::endl;
 
-            std::uint8_t byte = static_cast<std::uint8_t>(std::cin.get());
-            if (!std::cin) {
+            std::uint8_t byte;
+            if (!std::cin.read(reinterpret_cast<char*>(&byte), 1)) {
                 if (std::cin.eof()) {
                     return 0;
                 } else {
